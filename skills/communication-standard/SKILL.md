@@ -13,11 +13,11 @@ json
   "task_id": "string",
   "agent": "string",
   "status": "success | error | pending",
-  "summary": "Brief (1 sentence) summary in Polish.",
+  "summary": "Brief (1 sentence) summary in English.",
   "data": {
     "detailed_result": "..."
   }
 }
 ```
 
-If a sub-agent fails, the "summary" must contain the error explanation in Polish.
+If a sub-agent fails, the "summary" must contain the error explanation in English.

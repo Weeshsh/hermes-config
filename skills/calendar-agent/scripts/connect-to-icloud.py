@@ -2,14 +2,26 @@ import os
 import sys
 import json
 import argparse
-from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+from typing import Any, Optional
 import caldav
 
 ICLOUD_CALDAV_URL = "https://caldav.icloud.com"
 WRITE_CALENDAR_NAME = os.getenv("ICLOUD_WRITE_CALENDAR", "kalendarz agenta")
 
 blocked_calendars = {"klasa", "praca"}
+
+
+TZ_UTC2 = ZoneInfo("Europe/Warsaw")
+
+
+def to_utc2(dt: Any) -> Any:
+    if dt is None or not isinstance(dt, datetime):
+        return dt
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=TZ_UTC2)
+    return dt.astimezone(TZ_UTC2)
 
 
 class iCloudGatekeeper:
@@ -80,7 +92,9 @@ class iCloudGatekeeper:
         for cal_name, cal in calendars_to_check.items():
             if not cal:
                 continue
-            start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            start = datetime.now(TZ_UTC2).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
             end = start + timedelta(days=days)
 
             try:
@@ -98,16 +112,20 @@ class iCloudGatekeeper:
     def _parse_event(self, event, calendar_name: str) -> dict[str, Any]:
         try:
             vevent = event.instance.vevent
+            start_val = vevent.dtstart.value if hasattr(vevent, "dtstart") else None
+            end_val = vevent.dtend.value if hasattr(vevent, "dtend") else None
+
+            if start_val is not None:
+                start_val = to_utc2(start_val).isoformat()
+            if end_val is not None:
+                end_val = to_utc2(end_val).isoformat()
+
             return {
                 "title": str(vevent.summary.value)
                 if hasattr(vevent, "summary")
                 else "No title",
-                "start": vevent.dtstart.value.isoformat()
-                if hasattr(vevent, "dtstart")
-                else None,
-                "end": vevent.dtend.value.isoformat()
-                if hasattr(vevent, "dtend")
-                else None,
+                "start": start_val,
+                "end": end_val,
                 "calendar": calendar_name,
                 "uid": str(vevent.uid.value) if hasattr(vevent, "uid") else None,
             }
@@ -124,6 +142,8 @@ class iCloudGatekeeper:
         description: Optional[str] = None,
     ) -> dict[str, Any]:
         try:
+            start = to_utc2(start)
+            end = to_utc2(end)
             cal = self._get_calendar(calendar_name, require_write=True)
             cal.save_event(
                 dtstart=start,
@@ -147,8 +167,8 @@ class iCloudGatekeeper:
             if cal_name in blocked_calendars:
                 continue
             try:
-                start = datetime.now() - timedelta(days=365)
-                end = datetime.now() + timedelta(days=365)
+                start = datetime.now(TZ_UTC2) - timedelta(days=365)
+                end = datetime.now(TZ_UTC2) + timedelta(days=365)
                 for event in cal.date_search(start, end):
                     data = self._parse_event(event, cal_name)
                     if query.lower() in data.get("title", "").lower():
@@ -156,6 +176,96 @@ class iCloudGatekeeper:
             except Exception:
                 pass
         return result
+
+    def update_event(
+        self,
+        calendar_name: str,
+        event_uid: str,
+        title: Optional[str] = None,
+        start: Optional[datetime] = None,
+        end: Optional[datetime] = None,
+        location: Optional[str] = None,
+        description: Optional[str] = None,
+    ) -> dict[str, Any]:
+        try:
+            cal = self._get_calendar(calendar_name, require_write=True)
+            search_start = datetime.now() - timedelta(days=5)
+            search_end = datetime.now() + timedelta(days=30)
+            events = cal.date_search(start=search_start, end=search_end)
+
+            event = next(
+                (e for e in events if str(e.instance.vevent.uid.value) == event_uid),
+                None,
+            )
+
+            if not event:
+                return {
+                    "success": False,
+                    "error": f"Event with UID '{event_uid}' not found in calendar '{calendar_name}'",
+                }
+
+            vevent = event.instance.vevent
+            updated = False
+
+            if title is not None:
+                vevent.summary.value = title
+                updated = True
+            if start is not None:
+                vevent.dtstart.value = to_utc2(start)
+                updated = True
+            if end is not None:
+                vevent.dtend.value = to_utc2(end)
+                updated = True
+            if location is not None:
+                vevent.location.value = location
+                updated = True
+            if description is not None:
+                vevent.description.value = description
+                updated = True
+
+            if not updated:
+                return {"success": False, "error": "No fields provided for update"}
+
+            event.save()
+            return {
+                "success": True,
+                "message": f"Event '{event_uid}' updated in '{calendar_name}'",
+            }
+        except PermissionError as e:
+            return {"success": False, "error": str(e)}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def delete_event(self, calendar_name: str, event_uid: str) -> dict[str, Any]:
+        try:
+            cal = self._get_calendar(calendar_name, require_write=True)
+
+            start = datetime.now() - timedelta(days=5)
+            end = datetime.now() + timedelta(days=30)
+            events = cal.date_search(start=start, end=end)
+
+            event = next(
+                (e for e in events if str(e.instance.vevent.uid.value) == event_uid),
+                None,
+            )
+
+            if not event:
+                return {
+                    "success": False,
+                    "error": f"Event with UID '{event_uid}' not found in calendar '{calendar_name}'",
+                }
+
+            # Delete the fresh instance
+            event.delete()
+
+            return {
+                "success": True,
+                "message": f"Event '{event_uid}' deleted from '{calendar_name}'",
+            }
+        except PermissionError as e:
+            return {"success": False, "error": str(e)}
+        except Exception as e:
+            return {"success": False, "error": f"Error: {str(e)}"}
 
 
 def main():
@@ -177,6 +287,17 @@ def main():
 
     se = subparsers.add_parser("search")
     se.add_argument("--query", required=True)
+
+    ue = subparsers.add_parser("update_event")
+    ue.add_argument("--calendar", required=True)
+    ue.add_argument("--uid", required=True)
+    ue.add_argument("--title")
+    ue.add_argument("--start")
+    ue.add_argument("--end")
+
+    de = subparsers.add_parser("delete_event")
+    de.add_argument("--calendar", required=True)
+    de.add_argument("--uid", required=True)
 
     args = parser.parse_args()
 
@@ -212,6 +333,18 @@ def main():
             )
         elif args.command == "search":
             result = gk.search(args.query)
+        elif args.command == "update_event":
+            start_dt = datetime.fromisoformat(args.start) if args.start else None
+            end_dt = datetime.fromisoformat(args.end) if args.end else None
+            result = gk.update_event(
+                args.calendar,
+                args.uid,
+                title=args.title,
+                start=start_dt,
+                end=end_dt,
+            )
+        elif args.command == "delete_event":
+            result = gk.delete_event(args.calendar, args.uid)
         else:
             result = {"error": f"Unknown command: {args.command}"}
 

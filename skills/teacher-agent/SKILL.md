@@ -16,12 +16,11 @@ Handles all requests related to studying, exam preparation (AZ-900 etc.), and No
 ## Output Format
 Always return:
 ```json
-json
 {
   "task_id": "<ID>",
   "agent": "teacher-agent",
   "status": "success | error",
-  "summary": "Podsumowanie w języku polskim.",
+  "summary": "Summary in English.",
   "data": { ... }
 }
 ```
