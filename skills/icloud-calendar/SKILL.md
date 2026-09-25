@@ -1,9 +1,9 @@
 ---
-name: calendar-agent
+name: icloud-calendar
 description: "Exclusive sub-agent for iCloud interactions. Executes direct commands."
 ---
 
-# Calendar Agent
+# icloud Calendar connection
 
 ## Purpose
 **Exclusive bridge to the iCloud API.** Executes pre-planned commands issued by the Orchestrator. 
@@ -17,15 +17,3 @@ description: "Exclusive sub-agent for iCloud interactions. Executes direct comma
 - **NO REASONING:** If a command is given, do not verify paths or check variables—assume the Orchestrator provided a valid, executable command.
 - **SPEED IS PRIORITY:** Skip all intermediate "thinking" steps.
 - **EXCLUSIVE ACCESS:** Only `calendar-agent` is permitted to interact with the iCloud API.
-
-## Output Format
-Always return:
-```json
-{
-  "task_id": "<ID>",
-  "agent": "calendar-agent",
-  "status": "success | error",
-  "summary": "Summary in English.",
-  "data": { ... }
-}
-```
