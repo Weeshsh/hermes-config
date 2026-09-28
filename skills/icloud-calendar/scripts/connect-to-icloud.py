@@ -10,7 +10,9 @@ import caldav
 ICLOUD_CALDAV_URL = "https://caldav.icloud.com"
 WRITE_CALENDAR_NAME = os.getenv("ICLOUD_WRITE_CALENDAR", "kalendarz agenta")
 
-blocked_calendars = {"klasa", "praca"}
+# Parse blocked calendars from env var (comma-separated), default to klasa,praca
+_blocked_calendars_env = os.getenv("ICLOUD_BLOCKED_CALENDARS", "klasa,praca")
+blocked_calendars = set(cal.strip() for cal in _blocked_calendars_env.split(",") if cal.strip())
 
 
 TZ_UTC2 = ZoneInfo("Europe/Warsaw")
@@ -47,7 +49,7 @@ class iCloudGatekeeper:
         calendars = self.principal.calendars()
         self.calendars = {}
         for cal in calendars:
-            name = cal.name or "Unnamed"
+            name = cal.get_display_name() or "Unnamed"
             self.calendars[name] = cal
 
     def list_calendars(self) -> list[dict[str, Any]]:
@@ -98,7 +100,7 @@ class iCloudGatekeeper:
             end = start + timedelta(days=days)
 
             try:
-                events = cal.date_search(start, end)
+                events = cal.search(start=start, end=end, expand=True)
                 for event in events:
                     result.append(self._parse_event(event, cal_name))
             except Exception as e:
@@ -111,7 +113,7 @@ class iCloudGatekeeper:
 
     def _parse_event(self, event, calendar_name: str) -> dict[str, Any]:
         try:
-            vevent = event.instance.vevent
+            vevent = event.vobject_instance.vevent
             start_val = vevent.dtstart.value if hasattr(vevent, "dtstart") else None
             end_val = vevent.dtend.value if hasattr(vevent, "dtend") else None
 
@@ -169,7 +171,7 @@ class iCloudGatekeeper:
             try:
                 start = datetime.now(TZ_UTC2) - timedelta(days=365)
                 end = datetime.now(TZ_UTC2) + timedelta(days=365)
-                for event in cal.date_search(start, end):
+                for event in cal.search(start=start, end=end, expand=True):
                     data = self._parse_event(event, cal_name)
                     if query.lower() in data.get("title", "").lower():
                         result.append(data)
@@ -191,10 +193,10 @@ class iCloudGatekeeper:
             cal = self._get_calendar(calendar_name, require_write=True)
             search_start = datetime.now() - timedelta(days=5)
             search_end = datetime.now() + timedelta(days=30)
-            events = cal.date_search(start=search_start, end=search_end)
+            events = cal.search(start=search_start, end=search_end, expand=True)
 
             event = next(
-                (e for e in events if str(e.instance.vevent.uid.value) == event_uid),
+                (e for e in events if str(e.vobject_instance.vevent.uid.value) == event_uid),
                 None,
             )
 
@@ -242,10 +244,10 @@ class iCloudGatekeeper:
 
             start = datetime.now() - timedelta(days=5)
             end = datetime.now() + timedelta(days=30)
-            events = cal.date_search(start=start, end=end)
+            events = cal.search(start=start, end=end, expand=True)
 
             event = next(
-                (e for e in events if str(e.instance.vevent.uid.value) == event_uid),
+                (e for e in events if str(e.vobject_instance.vevent.uid.value) == event_uid),
                 None,
             )
 
